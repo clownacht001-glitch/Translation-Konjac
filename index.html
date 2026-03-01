@@ -1,0 +1,2735 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LinguaLens — リアルタイム翻訳</title>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@300;400;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0c14;
+    --surface: #111827;
+    --surface2: #1a2235;
+    --accent: #00e5ff;
+    --accent2: #ff6b6b;
+    --accent3: #a8ff78;
+    --text: #e8eaf0;
+    --muted: #6b7a99;
+    --border: rgba(255,255,255,0.07);
+    --glow: 0 0 20px rgba(0,229,255,0.3);
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Zen Kaku Gothic New', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Background grid */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: 
+      linear-gradient(rgba(0,229,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,229,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .app {
+    position: relative;
+    z-index: 1;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    min-height: 100vh;
+    gap: 16px;
+  }
+
+  /* Header */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    backdrop-filter: blur(10px);
+  }
+
+  .logo {
+    font-family: 'Space Mono', monospace;
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--accent);
+    text-shadow: var(--glow);
+    letter-spacing: -1px;
+  }
+
+  .logo span { color: var(--text); }
+
+  .lang-selector {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .lang-badge {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 1px;
+  }
+
+  .lang-badge.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(0,229,255,0.1);
+    box-shadow: 0 0 10px rgba(0,229,255,0.2);
+  }
+
+  /* Main layout */
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 16px;
+    min-height: 0;
+  }
+
+  /* Conversation panel */
+  .conversation-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent2);
+    animation: pulse 1.5s infinite;
+  }
+
+  .live-dot.active {
+    background: var(--accent3);
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.8); }
+  }
+
+  .messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    scroll-behavior: smooth;
+  }
+
+  .messages::-webkit-scrollbar { width: 4px; }
+  .messages::-webkit-scrollbar-track { background: transparent; }
+  .messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* Speech bubble */
+  .bubble-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    animation: slideUp 0.3s ease;
+  }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .speaker-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 0 14px;
+  }
+
+  .bubble {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px 18px;
+    max-width: 90%;
+    cursor: pointer;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    position: relative;
+  }
+
+  .bubble:hover {
+    border-color: rgba(0,229,255,0.3);
+    box-shadow: 0 0 15px rgba(0,229,255,0.1);
+  }
+
+  .bubble.selected {
+    border-color: var(--accent);
+    box-shadow: var(--glow);
+  }
+
+  .bubble-original {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-bottom: 6px;
+    font-family: 'Space Mono', monospace;
+  }
+
+  .bubble-translation {
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.5;
+    color: var(--text);
+  }
+
+  .bubble-nuance {
+    font-size: 0.78rem;
+    color: var(--accent);
+    margin-top: 6px;
+    line-height: 1.4;
+    font-weight: 300;
+  }
+
+  .bubble-hint {
+    font-size: 0.65rem;
+    color: var(--muted);
+    margin-top: 8px;
+    font-family: 'Space Mono', monospace;
+    letter-spacing: 1px;
+  }
+
+  /* Speaker colors */
+  .speaker-A .speaker-label { color: #00e5ff; }
+  .speaker-A .bubble { border-left: 3px solid #00e5ff; }
+  .speaker-B .speaker-label { color: #ff6b6b; }
+  .speaker-B .bubble { border-left: 3px solid #ff6b6b; }
+  .speaker-C .speaker-label { color: #a8ff78; }
+  .speaker-C .bubble { border-left: 3px solid #a8ff78; }
+
+  /* Word detail panel */
+  .detail-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .detail-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+  }
+
+  .detail-content::-webkit-scrollbar { width: 4px; }
+  .detail-content::-webkit-scrollbar-track { background: transparent; }
+  .detail-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .detail-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--muted);
+    text-align: center;
+    gap: 12px;
+    padding: 40px 20px;
+  }
+
+  .detail-empty-icon {
+    font-size: 2.5rem;
+    opacity: 0.3;
+  }
+
+  .detail-empty p {
+    font-size: 0.8rem;
+    font-family: 'Space Mono', monospace;
+    letter-spacing: 1px;
+    line-height: 1.6;
+  }
+
+  .full-sentence-box {
+    background: var(--surface2);
+    border: 1px solid rgba(0,229,255,0.2);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 20px;
+  }
+
+  .full-sentence-box .label {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 2px;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .full-sentence-box .translation {
+    font-size: 1.05rem;
+    font-weight: 700;
+    line-height: 1.5;
+    margin-bottom: 6px;
+  }
+
+  .full-sentence-box .nuance {
+    font-size: 0.8rem;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  .words-section .label {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 2px;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  .word-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    transition: border-color 0.2s;
+  }
+
+  .word-card:hover { border-color: rgba(255,255,255,0.15); }
+
+  .word-original {
+    font-family: 'Space Mono', monospace;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 2px;
+  }
+
+  .word-reading {
+    font-size: 0.7rem;
+    color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    margin-bottom: 4px;
+    letter-spacing: 1px;
+  }
+
+  .word-meaning {
+    font-size: 0.85rem;
+    color: var(--text);
+    margin-bottom: 4px;
+    font-weight: 700;
+  }
+
+  .word-example {
+    font-size: 0.72rem;
+    color: var(--muted);
+    line-height: 1.5;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+    margin-top: 6px;
+  }
+
+  .word-tags {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+  }
+
+  .word-tag {
+    font-size: 0.6rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(168,255,120,0.1);
+    color: var(--accent3);
+    font-family: 'Space Mono', monospace;
+    letter-spacing: 0.5px;
+  }
+
+  /* Controls */
+  .controls {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .record-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 24px;
+    border-radius: 40px;
+    border: none;
+    background: var(--accent2);
+    color: #fff;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 0 20px rgba(255,107,107,0.4);
+  }
+
+  .record-btn:hover {
+    transform: scale(1.03);
+    box-shadow: 0 0 30px rgba(255,107,107,0.6);
+  }
+
+  .record-btn.recording {
+    background: var(--accent3);
+    color: #0a0c14;
+    box-shadow: 0 0 20px rgba(168,255,120,0.5);
+    animation: recordPulse 1.5s infinite;
+  }
+
+  @keyframes recordPulse {
+    0%, 100% { box-shadow: 0 0 20px rgba(168,255,120,0.5); }
+    50% { box-shadow: 0 0 40px rgba(168,255,120,0.8); }
+  }
+
+  .record-btn .icon { font-size: 1rem; }
+
+  .source-lang-select {
+    padding: 10px 16px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.75rem;
+    cursor: pointer;
+    outline: none;
+  }
+
+  .source-lang-select:focus { border-color: var(--accent); }
+
+  .status-text {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+    letter-spacing: 1px;
+    flex: 1;
+  }
+
+  .clear-btn {
+    padding: 10px 18px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 1px;
+  }
+
+  .clear-btn:hover {
+    border-color: var(--accent2);
+    color: var(--accent2);
+  }
+
+  .demo-btn {
+    padding: 10px 18px;
+    border-radius: 10px;
+    border: 1px solid rgba(0,229,255,0.3);
+    background: rgba(0,229,255,0.05);
+    color: var(--accent);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 1px;
+  }
+
+  .demo-btn:hover {
+    background: rgba(0,229,255,0.12);
+    border-color: var(--accent);
+  }
+
+  /* Volume viz */
+  .waveform {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 30px;
+  }
+
+  .wave-bar {
+    width: 3px;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: height 0.1s;
+    opacity: 0.5;
+  }
+
+  /* Interim text */
+  .interim-bubble {
+    background: rgba(0,229,255,0.05);
+    border: 1px dashed rgba(0,229,255,0.3);
+    border-radius: 14px;
+    padding: 12px 18px;
+    font-size: 0.85rem;
+    color: var(--muted);
+    font-style: italic;
+    animation: fadeIn 0.2s ease;
+  }
+
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  .api-notice {
+    background: rgba(255,107,107,0.08);
+    border: 1px solid rgba(255,107,107,0.2);
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-size: 0.72rem;
+    color: rgba(255,107,107,0.8);
+    font-family: 'Space Mono', monospace;
+    line-height: 1.5;
+    letter-spacing: 0.3px;
+  }
+
+  @media (max-width: 768px) {
+    .main { grid-template-columns: 1fr; }
+    .detail-panel { min-height: 300px; }
+  }
+</style>
+<style>
+/* ── Tab system ── */
+.tab-bar {
+  display: flex;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 6px;
+}
+.tab-btn {
+  flex: 1;
+  padding: 10px 20px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-family: 'Space Mono', monospace;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active {
+  background: var(--surface2);
+  color: var(--accent);
+  box-shadow: 0 0 12px rgba(0,229,255,0.15);
+}
+.tab-btn .tab-icon { font-size: 1rem; }
+
+/* ── Tab panels ── */
+.tab-panel { display: none; flex-direction: column; gap: 16px; }
+.tab-panel.active { display: flex; }
+
+/* ── Conversation Mode ── */
+.conv-wrap {
+  display: grid;
+  grid-template-rows: 1fr auto 1fr;
+  gap: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  min-height: 520px;
+}
+
+/* Person B side (top — rotated for face-to-face) */
+.conv-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px 32px;
+  gap: 14px;
+  position: relative;
+  flex: 1;
+  min-height: 220px;
+}
+.conv-side.side-b {
+  transform: rotate(180deg);
+  background: linear-gradient(180deg, rgba(255,107,107,0.04) 0%, transparent 100%);
+  border-bottom: 1px solid var(--border);
+}
+.conv-side.side-a {
+  background: linear-gradient(180deg, rgba(0,229,255,0.04) 0%, transparent 100%);
+}
+
+.conv-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 10px 20px;
+  background: var(--surface2);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.conv-mic-btn {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 1.3rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.conv-mic-btn:hover { border-color: var(--accent); color: var(--accent); }
+.conv-mic-btn.active-a {
+  border-color: #00e5ff;
+  background: rgba(0,229,255,0.12);
+  box-shadow: 0 0 20px rgba(0,229,255,0.4);
+  animation: recordPulse 1.5s infinite;
+}
+.conv-mic-btn.active-b {
+  border-color: #ff6b6b;
+  background: rgba(255,107,107,0.12);
+  box-shadow: 0 0 20px rgba(255,107,107,0.4);
+  animation: recordPulse2 1.5s infinite;
+}
+@keyframes recordPulse2 {
+  0%,100% { box-shadow: 0 0 20px rgba(255,107,107,0.4); }
+  50% { box-shadow: 0 0 40px rgba(255,107,107,0.7); }
+}
+
+.conv-lang-indicator {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.65rem;
+  letter-spacing: 2px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.conv-text-main {
+  font-size: 2rem;
+  font-weight: 900;
+  line-height: 1.3;
+  text-align: center;
+  color: var(--text);
+  min-height: 64px;
+  transition: all 0.3s;
+  word-break: break-word;
+}
+.conv-text-sub {
+  font-size: 0.9rem;
+  font-weight: 400;
+  color: var(--muted);
+  text-align: center;
+  min-height: 24px;
+  line-height: 1.5;
+}
+.conv-text-original {
+  font-size: 0.72rem;
+  font-family: 'Space Mono', monospace;
+  color: rgba(255,255,255,0.2);
+  text-align: center;
+}
+
+.conv-side.side-a .conv-text-main { color: #00e5ff; }
+.conv-side.side-b .conv-text-main { color: #ff6b6b; }
+
+.conv-idle {
+  color: var(--muted);
+  font-size: 1rem;
+  font-weight: 400;
+  text-align: center;
+}
+.conv-idle .icon { font-size: 2rem; display: block; margin-bottom: 8px; opacity: 0.3; }
+
+/* auto-detect badge */
+.detect-badge {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.6rem;
+  padding: 3px 8px;
+  border-radius: 6px;
+  letter-spacing: 1px;
+  position: absolute;
+  top: 10px;
+  right: 14px;
+}
+.detect-badge.ja { background: rgba(0,229,255,0.1); color: var(--accent); border: 1px solid rgba(0,229,255,0.2); }
+.detect-badge.en { background: rgba(168,255,120,0.1); color: var(--accent3); border: 1px solid rgba(168,255,120,0.2); }
+
+/* Conv controls */
+.conv-controls {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.conv-pair-select {
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-family: 'Space Mono', monospace;
+  font-size: 0.72rem;
+  cursor: pointer;
+  outline: none;
+}
+.conv-status {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--muted);
+  letter-spacing: 1px;
+  flex: 1;
+}
+
+/* History row under conv */
+.conv-history {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 0;
+  overflow: hidden;
+  max-height: 180px;
+}
+.conv-history-header {
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+  font-family: 'Space Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--muted);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+.conv-history-list {
+  overflow-y: auto;
+  max-height: 140px;
+  padding: 8px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.conv-history-list::-webkit-scrollbar { width: 3px; }
+.conv-history-list::-webkit-scrollbar-thumb { background: var(--border); }
+.conv-history-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 0.75rem;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.conv-history-item:last-child { border-bottom: none; }
+.conv-history-who {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.6rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.who-a { background: rgba(0,229,255,0.1); color: var(--accent); }
+.who-b { background: rgba(255,107,107,0.1); color: var(--accent2); }
+.conv-history-text { line-height: 1.4; color: var(--text); }
+.conv-history-orig { font-size: 0.65rem; color: var(--muted); font-family: 'Space Mono', monospace; }
+
+/* ══ SUBTITLE MODE ══ */
+.sub-setup-guide {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 40px 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  text-align: center;
+}
+.sub-guide-icon { font-size: 3rem; }
+.sub-guide-title { font-size: 1.4rem; font-weight: 900; color: var(--text); }
+.sub-guide-desc { color: var(--muted); font-size: 0.88rem; line-height: 1.6; max-width: 520px; }
+.sub-steps { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 520px; text-align: left; }
+.sub-step { display: flex; gap: 14px; align-items: flex-start; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; }
+.sub-step-num { width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #0a0c14; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+.sub-step-text { font-size: 0.83rem; color: var(--text); line-height: 1.5; }
+.sub-note { background: rgba(255,107,107,0.07); border: 1px solid rgba(255,107,107,0.2); border-radius: 10px; padding: 10px 18px; font-size: 0.75rem; color: rgba(255,107,107,0.9); display: flex; gap: 8px; align-items: flex-start; max-width: 520px; text-align: left; line-height: 1.5; }
+.sub-note-icon { flex-shrink: 0; }
+.sub-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
+.sub-toggle-label { display: flex; align-items: center; gap: 6px; font-family: 'Space Mono', monospace; font-size: 0.72rem; color: var(--muted); cursor: pointer; }
+.sub-toggle-label input { accent-color: var(--accent); cursor: pointer; }
+.sub-start-btn { display: flex; align-items: center; gap: 8px; padding: 14px 28px; border-radius: 12px; border: none; background: var(--accent); color: #0a0c14; font-family: 'Space Mono', monospace; font-size: 0.85rem; font-weight: 700; letter-spacing: 1px; cursor: pointer; transition: all 0.2s; box-shadow: 0 0 20px rgba(0,229,255,0.3); }
+.sub-start-btn:hover { transform: scale(1.03); box-shadow: 0 0 30px rgba(0,229,255,0.5); }
+
+.sub-live-view { display: flex; flex-direction: column; gap: 12px; }
+.sub-live-controls { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.sub-live-info { display: flex; align-items: center; gap: 10px; }
+.sub-waveform { display: flex; gap: 2px; align-items: center; height: 20px; }
+.sub-wave-bar { width: 3px; height: 4px; background: var(--accent); border-radius: 1px; transition: height 0.1s; opacity: 0.5; }
+
+.sub-main-area { display: grid; grid-template-columns: 1fr 340px; gap: 12px; min-height: 500px; }
+.sub-display-area { background: #000; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; display: flex; flex-direction: column; position: relative; }
+.sub-history-scroll { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; scroll-behavior: smooth; }
+.sub-history-scroll::-webkit-scrollbar { width: 3px; }
+.sub-history-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); }
+
+.sub-hist-line { display: flex; flex-direction: column; gap: 3px; padding: 8px 12px; border-radius: 8px; background: rgba(255,255,255,0.03); cursor: pointer; transition: background 0.15s; animation: slideUp 0.25s ease; border: 1px solid transparent; }
+.sub-hist-line:hover { background: rgba(255,255,255,0.07); }
+.sub-hist-line.selected { background: rgba(0,229,255,0.07); border-color: rgba(0,229,255,0.2); }
+.sub-hist-ja { font-size: 1rem; font-weight: 700; color: #fff; line-height: 1.4; }
+.sub-hist-orig { font-size: 0.68rem; color: rgba(255,255,255,0.28); font-family: 'Space Mono', monospace; }
+
+.sub-current-box { background: linear-gradient(0deg, rgba(0,0,0,0.98) 0%, rgba(0,0,0,0.85) 100%); border-top: 1px solid rgba(255,255,255,0.06); padding: 18px 24px 22px; min-height: 120px; display: flex; flex-direction: column; gap: 5px; justify-content: flex-end; }
+.sub-current-interim { font-size: 0.78rem; color: rgba(255,255,255,0.28); font-family: 'Space Mono', monospace; min-height: 18px; line-height: 1.4; }
+.sub-current-main { font-size: 1.55rem; font-weight: 900; color: #ffe87a; line-height: 1.3; text-shadow: 0 2px 12px rgba(0,0,0,0.9); min-height: 42px; letter-spacing: 0.02em; transition: opacity 0.2s; }
+.sub-current-orig { font-size: 0.75rem; color: rgba(255,255,255,0.35); font-family: 'Space Mono', monospace; }
+.sub-learn-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; display: flex; flex-direction: column; overflow: hidden; }
+
+@media (max-width: 768px) {
+  .sub-main-area { grid-template-columns: 1fr; }
+  .sub-learn-panel { min-height: 260px; }
+  .sub-setup-guide { padding: 24px 20px; }
+}
+
+/* ══ TEXT CHAT ══ */
+.text-chat-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.text-chat-header {
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'Space Mono', monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+  letter-spacing: 1px;
+  flex-wrap: wrap;
+}
+.text-chat-who-btn {
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-family: 'Space Mono', monospace;
+  font-size: 0.6rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: 0.5px;
+}
+.text-chat-who-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(0,229,255,0.08);
+}
+.text-chat-messages {
+  padding: 14px 18px;
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 60px;
+}
+.text-chat-messages::-webkit-scrollbar { width: 3px; }
+.text-chat-messages::-webkit-scrollbar-thumb { background: var(--border); }
+.text-chat-empty {
+  color: var(--muted);
+  font-family: 'Space Mono', monospace;
+  font-size: 0.65rem;
+  letter-spacing: 0.5px;
+  padding: 4px 0;
+}
+.text-chat-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: slideUp 0.2s ease;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--surface2);
+  border-left: 3px solid var(--accent);
+  max-width: 100%;
+}
+.text-chat-bubble.side-b { border-left-color: var(--accent2); }
+.text-chat-bubble-orig {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-family: 'Space Mono', monospace;
+}
+.text-chat-bubble-trans {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.5;
+}
+.text-chat-bubble-nuance {
+  font-size: 0.7rem;
+  color: var(--accent);
+  line-height: 1.4;
+}
+.text-chat-input-row {
+  display: flex;
+  gap: 0;
+  border-top: 1px solid var(--border);
+}
+.text-chat-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: 'Zen Kaku Gothic New', sans-serif;
+  font-size: 0.9rem;
+  padding: 14px 18px;
+  resize: none;
+  line-height: 1.5;
+}
+.text-chat-input::placeholder { color: var(--muted); font-size: 0.82rem; }
+.text-chat-send-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 22px;
+  border: none;
+  border-left: 1px solid var(--border);
+  background: rgba(0,229,255,0.06);
+  color: var(--accent);
+  font-family: 'Space Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.text-chat-send-btn:hover { background: rgba(0,229,255,0.14); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo">Lingua<span>Lens</span></div>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <!-- API Key input -->
+      <div style="display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:4px 10px;">
+        <span style="font-family:'Space Mono',monospace;font-size:0.6rem;color:var(--muted);letter-spacing:1px;white-space:nowrap;">API KEY</span>
+        <input type="password" id="apiKeyInput"
+          placeholder="sk-ant-api03-..."
+          style="background:transparent;border:none;outline:none;color:var(--accent);font-family:'Space Mono',monospace;font-size:0.65rem;width:160px;letter-spacing:1px;"
+          oninput="saveApiKey(this.value)"
+        />
+        <span id="apiKeyStatus" style="font-size:0.7rem;">❌</span>
+      </div>
+      <div class="lang-selector" id="movieLangSelector">
+        <span style="font-size:0.65rem;color:var(--muted);font-family:'Space Mono',monospace;letter-spacing:1px;">表示言語</span>
+        <div class="lang-badge active" data-lang="ja" onclick="setDisplayLang('ja')">日本語</div>
+        <div class="lang-badge" data-lang="en" onclick="setDisplayLang('en')">EN</div>
+        <div class="lang-badge" data-lang="te" onclick="setDisplayLang('te')">తెలుగు</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Tab bar -->
+  <div class="tab-bar">
+    <button class="tab-btn active" id="tab-movie" onclick="switchTab('movie')">
+      <span class="tab-icon">🎬</span> 映画モード
+    </button>
+    <button class="tab-btn" id="tab-conv" onclick="switchTab('conv')">
+      <span class="tab-icon">💬</span> 会話モード
+    </button>
+    <button class="tab-btn" id="tab-sub" onclick="switchTab('sub')">
+      <span class="tab-icon">📺</span> 字幕モード
+    </button>
+  </div>
+
+  <!-- ══ MOVIE MODE ══ -->
+  <div class="tab-panel active" id="panel-movie">
+    <div class="main">
+      <div class="conversation-panel">
+        <div class="panel-header">
+          <div class="live-dot" id="liveDot"></div>
+          <span id="panelStatus">待機中</span>
+          <div class="waveform" id="waveform">
+            <div class="wave-bar" style="height:4px"></div>
+            <div class="wave-bar" style="height:6px"></div>
+            <div class="wave-bar" style="height:4px"></div>
+            <div class="wave-bar" style="height:8px"></div>
+            <div class="wave-bar" style="height:4px"></div>
+            <div class="wave-bar" style="height:6px"></div>
+            <div class="wave-bar" style="height:4px"></div>
+            <div class="wave-bar" style="height:10px"></div>
+            <div class="wave-bar" style="height:4px"></div>
+            <div class="wave-bar" style="height:6px"></div>
+          </div>
+        </div>
+        <div class="messages" id="messages">
+          <div class="detail-empty">
+            <div class="detail-empty-icon">🎬</div>
+            <p>マイクボタンを押して<br>音声認識を開始<br><br>またはデモを試してみて</p>
+          </div>
+        </div>
+      </div>
+      <div class="detail-panel">
+        <div class="panel-header">
+          <span>📖</span>
+          <span>単語・解説</span>
+        </div>
+        <div class="detail-content" id="detailContent">
+          <div class="detail-empty">
+            <div class="detail-empty-icon">💬</div>
+            <p>吹き出しをタップすると<br>単語解説が表示されます</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="controls">
+      <button class="record-btn" id="recordBtn" onclick="toggleRecording()">
+        <span class="icon">🎤</span>
+        <span id="recordLabel">録音開始</span>
+      </button>
+      <select class="source-lang-select" id="sourceLang">
+        <option value="en-US">英語 (English)</option>
+        <option value="te-IN">テルグ語 (Telugu)</option>
+        <option value="hi-IN">ヒンディー語 (Hindi)</option>
+        <option value="ko-KR">韓国語 (Korean)</option>
+        <option value="zh-CN">中国語 (Chinese)</option>
+        <option value="fr-FR">フランス語 (French)</option>
+        <option value="es-ES">スペイン語 (Spanish)</option>
+      </select>
+      <button class="demo-btn" onclick="runDemo()">▶ デモ再生</button>
+      <div class="status-text" id="statusText">音声入力の準備完了</div>
+      <button class="clear-btn" onclick="clearMessages()">クリア</button>
+      <button class="clear-btn" onclick="SpeakerEngine.reset();updateProfileUI();" style="border-color:rgba(168,255,120,0.3);color:var(--accent3);">話者リセット</button>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <span style="font-family:'Space Mono',monospace;font-size:0.6rem;color:var(--muted);letter-spacing:2px;text-transform:uppercase;">話者プロフィール</span>
+      <div id="speakerProfiles" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <span style="font-family:'Space Mono',monospace;font-size:0.65rem;color:var(--muted);">話者未検出</span>
+      </div>
+      <span style="font-family:'Space Mono',monospace;font-size:0.6rem;color:var(--muted);margin-left:auto;">ピッチ解析: YIN algorithm + エネルギー</span>
+    </div>
+  </div>
+
+  <!-- ══ CONVERSATION MODE ══ -->
+  <div class="tab-panel" id="panel-conv">
+
+    <!-- Face-to-face panel -->
+    <div class="conv-wrap">
+      <!-- Person B (top — rotated) -->
+      <div class="conv-side side-b" id="convSideB">
+        <div class="detect-badge en" id="convBadgeB">EN</div>
+        <div class="conv-text-original" id="convOrigB"></div>
+        <div class="conv-text-main" id="convMainB">
+          <span class="conv-idle"><span class="icon">🤝</span>相手の言語を<br>自動翻訳します</span>
+        </div>
+        <div class="conv-text-sub" id="convSubB"></div>
+      </div>
+
+      <!-- Centre divider with mic button -->
+      <div class="conv-divider">
+        <div style="font-family:'Space Mono',monospace;font-size:0.6rem;color:var(--muted);letter-spacing:1px;">Person B</div>
+        <button class="conv-mic-btn" id="convMicB" onclick="convStartB()" title="Person B が話す">🎤</button>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <div style="font-family:'Space Mono',monospace;font-size:0.55rem;color:var(--muted);letter-spacing:2px;" id="convModeLabel">CONV MODE</div>
+          <div style="display:flex;gap:4px;">
+            <div style="width:5px;height:5px;border-radius:50%;background:var(--accent);" id="convDotA"></div>
+            <div style="width:5px;height:5px;border-radius:50%;background:var(--accent2);" id="convDotB"></div>
+          </div>
+          <div id="csBadge" style="display:none;font-family:'Space Mono',monospace;font-size:0.5rem;color:#ffd700;background:rgba(255,215,0,0.1);border:1px solid rgba(255,215,0,0.3);border-radius:4px;padding:1px 5px;letter-spacing:1px;">CODE-SWITCH</div>
+        </div>
+        <button class="conv-mic-btn" id="convMicA" onclick="convStartA()" title="Person A が話す">🎤</button>
+        <div style="font-family:'Space Mono',monospace;font-size:0.6rem;color:var(--muted);letter-spacing:1px;">Person A</div>
+      </div>
+
+      <!-- Person A (bottom) -->
+      <div class="conv-side side-a" id="convSideA">
+        <div class="detect-badge ja" id="convBadgeA">JA</div>
+        <div class="conv-text-main" id="convMainA">
+          <span class="conv-idle"><span class="icon">🎙</span>マイクを押して<br>話してください</span>
+        </div>
+        <div class="conv-text-sub" id="convSubA"></div>
+        <div class="conv-text-original" id="convOrigA"></div>
+      </div>
+    </div>
+
+    <!-- Conv controls -->
+    <div class="conv-controls">
+      <select class="conv-pair-select" id="convPair" onchange="updateConvPair()">
+        <option value="ja-en">🇯🇵 日本語 ↔ 🇺🇸 English</option>
+        <option value="ja-te-cs">🇯🇵 日本語 ↔ 🇮🇳 Telugu+English（混合）</option>
+        <option value="ja-te">🇯🇵 日本語 ↔ 🇮🇳 Telugu</option>
+        <option value="ja-ko">🇯🇵 日本語 ↔ 🇰🇷 한국어</option>
+        <option value="ja-zh">🇯🇵 日本語 ↔ 🇨🇳 中文</option>
+        <option value="en-te-cs">🇺🇸 English ↔ 🇮🇳 Telugu+English（混合）</option>
+      </select>
+      <div class="conv-status" id="convStatus">どちらかのマイクボタンを押してください</div>
+      <button class="clear-btn" onclick="clearConv()">クリア</button>
+    </div>
+
+    <!-- History -->
+    <div class="conv-history">
+      <div class="conv-history-header">📜 会話履歴</div>
+      <div class="conv-history-list" id="convHistoryList">
+        <div style="color:var(--muted);font-size:0.72rem;font-family:'Space Mono',monospace;padding:8px 0;">まだ会話がありません</div>
+      </div>
+    </div>
+
+    <!-- Text Chat Input -->
+    <div class="text-chat-wrap">
+      <div class="text-chat-header">
+        <span style="font-size:0.9rem;">⌨️</span>
+        <span>テキスト翻訳</span>
+        <span style="font-size:0.6rem;color:var(--muted);margin-left:4px;letter-spacing:1px;">— 文字を打って翻訳</span>
+        <div style="margin-left:auto;display:flex;gap:6px;align-items:center;">
+          <span style="font-size:0.6rem;color:var(--muted);font-family:'Space Mono',monospace;">誰として送る</span>
+          <button class="text-chat-who-btn active" id="textWhoA" onclick="setTextWho('a')">A（あなた）</button>
+          <button class="text-chat-who-btn" id="textWhoB" onclick="setTextWho('b')">B（相手）</button>
+        </div>
+      </div>
+      <div class="text-chat-messages" id="textChatMessages">
+        <div class="text-chat-empty">テキストを入力して翻訳 — 会話履歴にも追加されます</div>
+      </div>
+      <div class="text-chat-input-row">
+        <textarea class="text-chat-input" id="textChatInput"
+          placeholder="ここに文章を入力... (Enter で送信、Shift+Enter で改行)"
+          rows="2"
+          onkeydown="textChatKeydown(event)"></textarea>
+        <button class="text-chat-send-btn" onclick="textChatSend()">
+          <span>翻訳</span><span style="font-size:1rem;">→</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SUBTITLE MODE ══ -->
+  <div class="tab-panel" id="panel-sub">
+
+    <!-- Step guide (shown before capture starts) -->
+    <div id="subSetupGuide" class="sub-setup-guide">
+      <div class="sub-guide-icon">📺</div>
+      <h2 class="sub-guide-title">リアルタイム字幕モード</h2>
+      <p class="sub-guide-desc">YouTubeなど字幕のない動画を再生しながら、音声を自動認識して日本語字幕を表示します。</p>
+
+      <div class="sub-steps">
+        <div class="sub-step">
+          <div class="sub-step-num">1</div>
+          <div class="sub-step-text">別タブ（またはウィンドウ）で見たい動画を開いて再生する</div>
+        </div>
+        <div class="sub-step">
+          <div class="sub-step-num">2</div>
+          <div class="sub-step-text">下の「画面共有を開始」を押す → ブラウザの許可ダイアログで動画のタブを選び「音声も共有」にチェック</div>
+        </div>
+        <div class="sub-step">
+          <div class="sub-step-num">3</div>
+          <div class="sub-step-text">字幕が画面下に自動表示されます。学習モードで単語解説も可能。</div>
+        </div>
+      </div>
+
+      <div class="sub-note">
+        <span class="sub-note-icon">⚠️</span>
+        Netflix・Amazon PrimeはDRM保護のため音声取得不可。YouTube・一般動画サイト対応。
+      </div>
+
+      <div class="sub-actions">
+        <select class="source-lang-select" id="subSrcLang" style="padding:12px 18px;font-size:0.8rem;">
+          <option value="en-US">英語 (English)</option>
+          <option value="te-IN">テルグ語 (Telugu)</option>
+          <option value="te-en">Telugu+English（混合・Tenglish）</option>
+          <option value="hi-IN">ヒンディー語 (Hindi)</option>
+          <option value="ko-KR">韓国語 (Korean)</option>
+          <option value="zh-CN">中国語 (Chinese)</option>
+          <option value="fr-FR">フランス語 (French)</option>
+        </select>
+        <label class="sub-toggle-label">
+          <input type="checkbox" id="subLearnMode" checked>
+          <span>単語学習モード</span>
+        </label>
+        <button class="sub-start-btn" id="subStartBtn" onclick="subStart()">
+          <span>🖥</span> 画面共有を開始
+        </button>
+      </div>
+    </div>
+
+    <!-- Live subtitle view (shown after capture starts) -->
+    <div id="subLiveView" class="sub-live-view" style="display:none;">
+
+      <!-- Mini controls bar -->
+      <div class="sub-live-controls">
+        <div class="sub-live-info">
+          <div class="live-dot active" style="width:8px;height:8px;border-radius:50%;animation:pulse 1s infinite;"></div>
+          <span id="subLiveLang" style="font-family:'Space Mono',monospace;font-size:0.7rem;color:var(--accent);letter-spacing:1px;">EN → JA</span>
+          <div class="sub-waveform" id="subWaveform">
+            <div class="sub-wave-bar"></div><div class="sub-wave-bar"></div>
+            <div class="sub-wave-bar"></div><div class="sub-wave-bar"></div>
+            <div class="sub-wave-bar"></div><div class="sub-wave-bar"></div>
+            <div class="sub-wave-bar"></div><div class="sub-wave-bar"></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="clear-btn" onclick="subTogglePause()" id="subPauseBtn">⏸ 一時停止</button>
+          <button class="clear-btn" onclick="subClearHistory()">クリア</button>
+          <button class="clear-btn" style="border-color:var(--accent2);color:var(--accent2);" onclick="subStop()">■ 停止</button>
+        </div>
+      </div>
+
+      <!-- Main area: subtitle + learn panel -->
+      <div class="sub-main-area">
+
+        <!-- Left: subtitle display area -->
+        <div class="sub-display-area">
+          <!-- Scrolling history (top) -->
+          <div class="sub-history-scroll" id="subHistoryScroll"></div>
+
+          <!-- Current live subtitle (bottom, prominent) -->
+          <div class="sub-current-box" id="subCurrentBox">
+            <div class="sub-current-interim" id="subInterim">音声を聴き取っています...</div>
+            <div class="sub-current-main" id="subCurrentMain"></div>
+            <div class="sub-current-orig" id="subCurrentOrig"></div>
+          </div>
+        </div>
+
+        <!-- Right: word learn panel (only when learn mode on) -->
+        <div class="sub-learn-panel" id="subLearnPanel">
+          <div class="panel-header" style="padding:12px 16px;border-bottom:1px solid var(--border);">
+            <span>📖</span><span>単語解説</span>
+          </div>
+          <div class="detail-content" id="subLearnContent">
+            <div class="detail-empty">
+              <div class="detail-empty-icon" style="font-size:1.8rem;">💡</div>
+              <p style="font-size:0.75rem;">字幕をタップすると<br>単語解説が表示されます</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /app -->
+
+<script>
+// ============================================================
+// API Key Management
+// ============================================================
+let _apiKey = '';
+
+function saveApiKey(val) {
+  _apiKey = val.trim();
+  try { localStorage.setItem('ll_apikey', _apiKey); } catch(e) {}
+  document.getElementById('apiKeyStatus').textContent = _apiKey.startsWith('sk-ant') ? '✅' : '❌';
+}
+
+function getApiKey() { return _apiKey; }
+
+function loadApiKey() {
+  try {
+    const saved = localStorage.getItem('ll_apikey') || '';
+    if (saved) {
+      _apiKey = saved;
+      const el = document.getElementById('apiKeyInput');
+      if (el) el.value = saved;
+      document.getElementById('apiKeyStatus').textContent = saved.startsWith('sk-ant') ? '✅' : '❌';
+    }
+  } catch(e) {}
+}
+
+// Central fetch wrapper — always injects key + required headers
+async function callClaude(messages, maxTokens = 800) {
+  const key = getApiKey();
+  if (!key) throw new Error('APIキーが設定されていません。画面上部に入力してください。');
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-5',
+      max_tokens: maxTokens,
+      messages,
+    })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  const raw = data.content?.[0]?.text || '';
+  return raw.replace(/```json|```/g, '').trim();
+}
+
+// ============================================================
+// State
+// ============================================================
+let recognition = null;
+let isRecording = false;
+let displayLang = 'ja';
+let selectedBubbleId = null;
+let messageId = 0;
+let currentTab = 'movie';
+
+// ============================================================
+// 🎙 Speaker Identification Engine (Web Audio API)
+// ============================================================
+// How it works:
+//   1. Tap microphone audio via AudioContext + AnalyserNode
+//   2. Every 50ms while speech is active: measure pitch (YIN algorithm)
+//      and RMS energy. Collect samples during a speech segment.
+//   3. When speech ends, compute segment's (medianPitch, meanEnergy).
+//   4. Compare against stored speaker profiles. If distance < threshold
+//      → same speaker. Otherwise → new speaker (up to 3 slots: A/B/C).
+//   5. Profile is updated with moving average so it adapts over time.
+// ============================================================
+
+const SpeakerEngine = (() => {
+  const SPEAKER_COLORS = ['A', 'B', 'C'];
+  const MATCH_THRESHOLD = 60;   // Hz distance below which = same speaker
+  const ENERGY_WEIGHT   = 0.3;  // how much energy matters vs pitch
+  const SMOOTH_RATE     = 0.25; // moving average rate for profile updates
+
+  let audioCtx = null;
+  let analyser = null;
+  let micStream = null;
+  let animFrame = null;
+  let sampleBuffer = [];        // pitch+energy samples in current segment
+  let profiles = [];            // { id:'A', pitch:Hz, energy:float, count:int }
+  let currentSpeaker = 'A';
+  let speechActive = false;
+  let silenceTimer = null;
+  const SILENCE_GAP = 600; // ms of silence before segment ends
+
+  // --- YIN pitch detection (simplified, works on Float32 buffer) ---
+  function detectPitch(buf, sampleRate) {
+    const SIZE = buf.length;
+    const HALF = Math.floor(SIZE / 2);
+    const threshold = 0.15;
+    const yinBuf = new Float32Array(HALF);
+
+    // Step 1: difference function
+    for (let tau = 1; tau < HALF; tau++) {
+      let sum = 0;
+      for (let i = 0; i < HALF; i++) {
+        const d = buf[i] - buf[i + tau];
+        sum += d * d;
+      }
+      yinBuf[tau] = sum;
+    }
+
+    // Step 2: cumulative mean normalized difference
+    yinBuf[0] = 1;
+    let runSum = 0;
+    for (let tau = 1; tau < HALF; tau++) {
+      runSum += yinBuf[tau];
+      yinBuf[tau] *= tau / runSum;
+    }
+
+    // Step 3: absolute threshold
+    for (let tau = 2; tau < HALF; tau++) {
+      if (yinBuf[tau] < threshold) {
+        // parabolic interpolation
+        const prev = yinBuf[tau - 1], curr = yinBuf[tau], next = yinBuf[tau + 1] ?? curr;
+        const betterTau = tau + (next - prev) / (2 * (2 * curr - next - prev));
+        return sampleRate / betterTau;
+      }
+    }
+    return -1; // unvoiced
+  }
+
+  // --- RMS energy ---
+  function rmsEnergy(buf) {
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+    return Math.sqrt(sum / buf.length);
+  }
+
+  // --- median helper ---
+  function median(arr) {
+    if (!arr.length) return 0;
+    const s = [...arr].sort((a, b) => a - b);
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  }
+
+  // --- Match segment to existing profiles ---
+  function matchSpeaker(pitch, energy) {
+    if (pitch < 50 || pitch > 500) {
+      // No reliable pitch — keep last speaker
+      return currentSpeaker;
+    }
+
+    let bestId = null, bestDist = Infinity;
+
+    for (const p of profiles) {
+      const pitchDist = Math.abs(p.pitch - pitch);
+      const energyDist = Math.abs(p.energy - energy) * 200; // scale energy
+      const dist = pitchDist * (1 - ENERGY_WEIGHT) + energyDist * ENERGY_WEIGHT;
+      if (dist < bestDist) { bestDist = dist; bestId = p.id; }
+    }
+
+    if (bestDist < MATCH_THRESHOLD && bestId !== null) {
+      // Update profile with moving average
+      const profile = profiles.find(p => p.id === bestId);
+      profile.pitch  = profile.pitch  * (1 - SMOOTH_RATE) + pitch  * SMOOTH_RATE;
+      profile.energy = profile.energy * (1 - SMOOTH_RATE) + energy * SMOOTH_RATE;
+      profile.count++;
+      return bestId;
+    }
+
+    // New speaker
+    if (profiles.length < 3) {
+      const newId = SPEAKER_COLORS[profiles.length];
+      profiles.push({ id: newId, pitch, energy, count: 1 });
+      updateProfileUI();
+      return newId;
+    }
+
+    // More than 3 speakers — assign to closest anyway
+    return bestId || currentSpeaker;
+  }
+
+  // --- Segment analysis ---
+  function analyzeSegment() {
+    if (!sampleBuffer.length) return;
+    const pitches  = sampleBuffer.map(s => s.pitch).filter(p => p > 50 && p < 500);
+    const energies = sampleBuffer.map(s => s.energy);
+    const medPitch  = median(pitches);
+    const meanEnergy = energies.reduce((a, b) => a + b, 0) / energies.length;
+    sampleBuffer = [];
+
+    if (medPitch > 0) {
+      currentSpeaker = matchSpeaker(medPitch, meanEnergy);
+      updateProfileUI();
+    }
+  }
+
+  // --- Sampling loop ---
+  function sampleLoop() {
+    if (!analyser) return;
+    const buf = new Float32Array(analyser.fftSize);
+    analyser.getFloatTimeDomainData(buf);
+
+    const energy = rmsEnergy(buf);
+    const VOICE_THRESHOLD = 0.01;
+
+    if (energy > VOICE_THRESHOLD) {
+      speechActive = true;
+      clearTimeout(silenceTimer);
+      const pitch = detectPitch(buf, audioCtx.sampleRate);
+      if (pitch > 0) sampleBuffer.push({ pitch, energy });
+
+      // Restart silence timer
+      silenceTimer = setTimeout(() => {
+        if (speechActive) {
+          speechActive = false;
+          analyzeSegment();
+        }
+      }, SILENCE_GAP);
+    }
+
+    animFrame = requestAnimationFrame(sampleLoop);
+  }
+
+  // --- Public API ---
+  async function start() {
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = audioCtx.createMediaStreamSource(micStream);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      src.connect(analyser);
+      sampleLoop();
+    } catch(e) {
+      console.warn('Web Audio API unavailable:', e);
+    }
+  }
+
+  function stop() {
+    cancelAnimationFrame(animFrame);
+    clearTimeout(silenceTimer);
+    if (audioCtx) { audioCtx.close(); audioCtx = null; }
+    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+    analyser = null;
+    sampleBuffer = [];
+  }
+
+  function reset() {
+    profiles = [];
+    currentSpeaker = 'A';
+    sampleBuffer = [];
+    updateProfileUI();
+  }
+
+  function getCurrent() { return currentSpeaker; }
+  function getProfiles() { return profiles; }
+
+  return { start, stop, reset, getCurrent, getProfiles };
+})();
+
+// --- Profile UI ---
+function updateProfileUI() {
+  const profiles = SpeakerEngine.getProfiles();
+  const container = document.getElementById('speakerProfiles');
+  if (!container) return;
+  container.innerHTML = '';
+  const colors = { A: '#00e5ff', B: '#ff6b6b', C: '#a8ff78' };
+  profiles.forEach(p => {
+    const el = document.createElement('div');
+    el.className = 'speaker-profile-chip';
+    el.style.cssText = `display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;border:1px solid ${colors[p.id]}33;background:${colors[p.id]}11;font-family:'Space Mono',monospace;font-size:0.65rem;color:${colors[p.id]};`;
+    el.innerHTML = `<span style="width:6px;height:6px;border-radius:50%;background:${colors[p.id]};display:inline-block;"></span> ${p.id} &nbsp;<span style="color:rgba(255,255,255,0.3)">${Math.round(p.pitch)}Hz · ${p.count}発話</span>`;
+    container.appendChild(el);
+  });
+  if (!profiles.length) {
+    container.innerHTML = `<span style="font-family:'Space Mono',monospace;font-size:0.65rem;color:var(--muted);">話者未検出</span>`;
+  }
+}
+
+// ============================================================
+// Translation & Word breakdown data
+// Demo data to show the concept (real app needs Anthropic API)
+// ============================================================
+const demoMessages = [
+  {
+    speaker: 'A',
+    original: "I haven't eaten anything since this morning. I'm starving!",
+    lang: 'en',
+    translations: {
+      ja: "今朝から何も食べてない。お腹ペコペコだよ！",
+      nuance: "単なる「お腹すいた」より強い飢餓感を表現。カジュアルな会話のニュアンス。",
+      te: "నేను ఉదయం నుండి ఏమీ తినలేదు. నాకు చాలా ఆకలిగా ఉంది!",
+    },
+    words: [
+      { original: "haven't eaten", reading: "ハヴント イートゥン", meaning: "食べていない", tag: "現在完了形", example: "I haven't slept → まだ寝ていない" },
+      { original: "since", reading: "スィンス", meaning: "〜から・〜以来", tag: "前置詞", example: "since morning → 朝から" },
+      { original: "this morning", reading: "ðɪs ˈmɔːrnɪŋ", meaning: "今朝", tag: "時間表現", example: "this afternoon → 今午後" },
+      { original: "starving", reading: "スターヴィング", meaning: "飢え死にしそう", tag: "強調表現", example: "I'm starving = お腹ペコペコ (hungryより強い)" },
+    ]
+  },
+  {
+    speaker: 'B',
+    original: "Let's grab something quick. There's a place nearby.",
+    lang: 'en',
+    translations: {
+      ja: "さっとどこか食べに行こう。近くにお店あるよ。",
+      nuance: "「grab」は食べ物をさっと手に入れるカジュアルな動詞。急いで食事する意味。",
+      te: "త్వరగా ఏదైనా తిందాం. దగ్గర్లో ఒక చోటు ఉంది.",
+    },
+    words: [
+      { original: "grab", reading: "グラブ", meaning: "さっと食べる／手に入れる", tag: "口語表現", example: "grab lunch → ランチをさっと食べる" },
+      { original: "something quick", reading: "サムシング クウィック", meaning: "さっと食べられるもの", tag: "フレーズ", example: "something cold → 冷たいもの" },
+      { original: "nearby", reading: "ニアバイ", meaning: "近くに", tag: "副詞", example: "Is there a station nearby? → 駅は近くにありますか？" },
+    ]
+  },
+  {
+    speaker: 'C',
+    original: "Count me in! I could really use a break right now.",
+    lang: 'en',
+    translations: {
+      ja: "私も行く！今ちょうど休憩したかったとこ。",
+      nuance: "「Count me in」は誘いに快く応じる定番フレーズ。「could use」は〜があるとありがたいという意味。",
+      te: "నన్ను కూడా లెక్కలోకి తీసుకో! నాకు ఇప్పుడు నిజంగా విశ్రాంతి అవసరం.",
+    },
+    words: [
+      { original: "Count me in", reading: "カウント ミー イン", meaning: "私も仲間に入れて", tag: "慣用句", example: "Count me in! ↔ Count me out = 私は遠慮する" },
+      { original: "could use", reading: "クッド ユーズ", meaning: "〜があるとありがたい", tag: "丁寧な要望", example: "I could use some help → 助けてもらえると助かる" },
+      { original: "break", reading: "ブレイク", meaning: "休憩", tag: "名詞", example: "take a break → 一息つく" },
+      { original: "right now", reading: "ライト ナウ", meaning: "ちょうど今", tag: "時間表現", example: "right now vs. now → right nowのほうが緊急感が強い" },
+    ]
+  }
+];
+
+let demoIdx = 0;
+
+// ============================================================
+// Display Language
+// ============================================================
+function setDisplayLang(lang) {
+  displayLang = lang;
+  document.querySelectorAll('.lang-badge').forEach(b => {
+    b.classList.toggle('active', b.dataset.lang === lang);
+  });
+  // Refresh existing bubbles' translations
+  document.querySelectorAll('.bubble-translation[data-translations]').forEach(el => {
+    try {
+      const t = JSON.parse(el.dataset.translations);
+      el.textContent = t[lang] || t['ja'] || '';
+    } catch(e) {}
+  });
+}
+
+// ============================================================
+// Recording
+// ============================================================
+function toggleRecording() {
+  if (isRecording) stopRecording();
+  else startRecording();
+}
+
+async function startRecording() {
+  await SpeakerEngine.start();
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    setStatus('⚠ このブラウザは音声認識非対応。Chromeを使ってください。');
+    return;
+  }
+
+  recognition = new SpeechRecognition();
+  recognition.lang = document.getElementById('sourceLang').value;
+  recognition.continuous = true;
+  recognition.interimResults = true;
+
+  recognition.onstart = () => {
+    isRecording = true;
+    updateRecordUI(true);
+    setStatus('🎙 聴き取り中... 話者を自動検出しています');
+    startWaveAnimation();
+    clearInterim();
+  };
+
+  recognition.onresult = (e) => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) {
+        clearInterim();
+        addBubbleFromSpeech(t);
+      } else {
+        interim += t;
+      }
+    }
+    if (interim) showInterim(interim);
+  };
+
+  recognition.onerror = (e) => {
+    setStatus('エラー: ' + e.error);
+    stopRecording();
+  };
+
+  recognition.onend = () => {
+    if (isRecording) recognition.start();
+  };
+
+  recognition.start();
+}
+
+function stopRecording() {
+  isRecording = false;
+  if (recognition) { recognition.stop(); recognition = null; }
+  SpeakerEngine.stop();
+  updateRecordUI(false);
+  setStatus('停止しました');
+  stopWaveAnimation();
+  clearInterim();
+}
+
+function updateRecordUI(recording) {
+  const btn = document.getElementById('recordBtn');
+  const label = document.getElementById('recordLabel');
+  const dot = document.getElementById('liveDot');
+  btn.classList.toggle('recording', recording);
+  label.textContent = recording ? '停止' : '録音開始';
+  dot.classList.toggle('active', recording);
+  document.getElementById('panelStatus').textContent = recording ? 'LIVE' : '待機中';
+}
+
+// ============================================================
+// Bubble creation from speech
+// ============================================================
+function addBubbleFromSpeech(text) {
+  const speaker = SpeakerEngine.getCurrent();
+  // For demo, create simple translation placeholder
+  // In production, call Anthropic API here
+  const id = ++messageId;
+  const msg = {
+    id,
+    speaker,
+    original: text,
+    translations: { ja: `[翻訳中... ${text}]`, te: `[అనువాదం...]` },
+    nuance: '翻訳を取得中...',
+    words: []
+  };
+  renderBubble(msg);
+  translateWithAPI(text, id); // async
+}
+
+// ============================================================
+// Anthropic API translation
+// ============================================================
+async function translateWithAPI(text, id) {
+  const langName = document.getElementById('sourceLang').selectedOptions[0].text;
+  const prompt = `You are a translation assistant. The user is a Japanese person watching a movie in ${langName}.
+
+Text to translate: "${text}"
+
+Respond ONLY with a JSON object (no markdown) in this exact shape:
+{
+  "ja": "Japanese translation (natural, nuanced - not literal)",
+  "te": "Telugu translation",
+  "nuance": "One sentence in Japanese explaining the nuance, tone, or cultural context",
+  "words": [
+    {"original": "word/phrase", "reading": "katakana or phonetic", "meaning": "Japanese meaning", "tag": "品詞/文法", "example": "usage example in Japanese"}
+  ]
+}
+Include 3-6 most important or interesting words/phrases. Keep it educational for a Japanese learner.`;
+
+  try {
+    const raw = await callClaude([{ role: 'user', content: prompt }], 1000);
+    const parsed = JSON.parse(raw);
+    updateBubble(id, parsed);
+  } catch(e) {
+    updateBubble(id, {
+      ja: text + '（翻訳エラー）',
+      te: '',
+      nuance: e.message || 'APIキーを確認してください。',
+      words: []
+    });
+  }
+}
+
+// ============================================================
+// Demo mode
+// ============================================================
+function runDemo() {
+  if (demoIdx >= demoMessages.length) demoIdx = 0;
+  const msg = demoMessages[demoIdx++];
+  const id = ++messageId;
+  const fullMsg = { ...msg, id };
+  renderBubble(fullMsg);
+  
+  setStatus('デモ再生中 — 吹き出しをタップして単語解説を見てみよう');
+  document.getElementById('liveDot').classList.add('active');
+  setTimeout(() => document.getElementById('liveDot').classList.remove('active'), 800);
+}
+
+// ============================================================
+// Render bubble
+// ============================================================
+function renderBubble(msg) {
+  const messages = document.getElementById('messages');
+  
+  // Remove empty state
+  const empty = messages.querySelector('.detail-empty');
+  if (empty) empty.remove();
+
+  const wrap = document.createElement('div');
+  wrap.className = `bubble-wrap speaker-${msg.speaker}`;
+  wrap.id = `wrap-${msg.id}`;
+
+  const speakerLabel = document.createElement('div');
+  speakerLabel.className = 'speaker-label';
+  speakerLabel.textContent = `話者 ${msg.speaker}`;
+
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.onclick = () => showDetail(msg.id);
+
+  const original = document.createElement('div');
+  original.className = 'bubble-original';
+  original.textContent = msg.original || '';
+
+  const translation = document.createElement('div');
+  translation.className = 'bubble-translation';
+  translation.dataset.id = msg.id;
+  
+  const translations = msg.translations || {};
+  const transMap = { ja: msg.translations?.ja || msg.translations?.ja, te: msg.translations?.te };
+  translation.dataset.translations = JSON.stringify({ 
+    ja: translations.ja || '',
+    en: msg.original || '',
+    te: translations.te || ''
+  });
+  translation.textContent = translations[displayLang] || translations.ja || '';
+
+  const nuance = document.createElement('div');
+  nuance.className = 'bubble-nuance';
+  nuance.dataset.id = `nuance-${msg.id}`;
+  nuance.textContent = msg.translations?.nuance || msg.nuance || '';
+
+  const hint = document.createElement('div');
+  hint.className = 'bubble-hint';
+  hint.textContent = '→ タップして単語解説を見る';
+
+  bubble.append(original, translation, nuance, hint);
+  wrap.append(speakerLabel, bubble);
+  messages.appendChild(wrap);
+  messages.scrollTop = messages.scrollHeight;
+
+  // Store message data
+  window._msgData = window._msgData || {};
+  window._msgData[msg.id] = msg;
+}
+
+function updateBubble(id, data) {
+  const translEl = document.querySelector(`.bubble-translation[data-id="${id}"]`);
+  const nuanceEl = document.querySelector(`[data-id="nuance-${id}"]`);
+  
+  if (translEl) {
+    const tmap = { ja: data.ja || '', en: window._msgData?.[id]?.original || '', te: data.te || '' };
+    translEl.dataset.translations = JSON.stringify(tmap);
+    translEl.textContent = tmap[displayLang] || tmap.ja || '';
+  }
+  if (nuanceEl) nuanceEl.textContent = data.nuance || '';
+  
+  if (window._msgData?.[id]) {
+    window._msgData[id].translations = { ja: data.ja, te: data.te, nuance: data.nuance };
+    window._msgData[id].words = data.words || [];
+  }
+
+  if (selectedBubbleId === id) showDetail(id);
+}
+
+// ============================================================
+// Detail panel
+// ============================================================
+function showDetail(id) {
+  selectedBubbleId = id;
+  
+  // Deselect all bubbles
+  document.querySelectorAll('.bubble').forEach(b => b.classList.remove('selected'));
+  const wrap = document.getElementById(`wrap-${id}`);
+  if (wrap) wrap.querySelector('.bubble').classList.add('selected');
+
+  const msg = window._msgData?.[id];
+  if (!msg) return;
+
+  const panel = document.getElementById('detailContent');
+  panel.innerHTML = '';
+
+  // Full sentence box
+  const sentBox = document.createElement('div');
+  sentBox.className = 'full-sentence-box';
+  sentBox.innerHTML = `
+    <div class="label">📝 翻訳</div>
+    <div class="translation">${msg.translations?.ja || msg.translations?.ja || ''}</div>
+    <div class="nuance" style="margin-top:6px;color:var(--accent);font-size:0.78rem;">${msg.translations?.nuance || msg.nuance || ''}</div>
+    <div class="nuance" style="margin-top:6px;">${msg.original || ''}</div>
+  `;
+  panel.appendChild(sentBox);
+
+  // Words section
+  if (msg.words && msg.words.length > 0) {
+    const wordsSection = document.createElement('div');
+    wordsSection.className = 'words-section';
+    wordsSection.innerHTML = `<div class="label">🔤 単語・フレーズ解説</div>`;
+    
+    msg.words.forEach(w => {
+      const card = document.createElement('div');
+      card.className = 'word-card';
+      card.innerHTML = `
+        <div class="word-original">${w.original}</div>
+        <div class="word-reading">${w.reading || ''}</div>
+        <div class="word-meaning">${w.meaning}</div>
+        ${w.example ? `<div class="word-example">💡 ${w.example}</div>` : ''}
+        <div class="word-tags"><span class="word-tag">${w.tag || ''}</span></div>
+      `;
+      wordsSection.appendChild(card);
+    });
+    panel.appendChild(wordsSection);
+  } else {
+    panel.innerHTML += `<div style="color:var(--muted);font-size:0.78rem;font-family:'Space Mono',monospace;text-align:center;margin-top:20px;">単語データなし（デモデータをお試しください）</div>`;
+  }
+}
+
+// ============================================================
+// Interim display
+// ============================================================
+let interimEl = null;
+function showInterim(text) {
+  clearInterim();
+  interimEl = document.createElement('div');
+  interimEl.className = 'interim-bubble';
+  interimEl.textContent = text;
+  document.getElementById('messages').appendChild(interimEl);
+  document.getElementById('messages').scrollTop = 9999;
+}
+function clearInterim() {
+  if (interimEl) { interimEl.remove(); interimEl = null; }
+}
+
+// ============================================================
+// Waveform animation
+// ============================================================
+let waveInterval = null;
+function startWaveAnimation() {
+  const bars = document.querySelectorAll('.wave-bar');
+  waveInterval = setInterval(() => {
+    bars.forEach(b => {
+      b.style.height = (Math.random() * 20 + 4) + 'px';
+      b.style.opacity = (Math.random() * 0.5 + 0.3).toFixed(2);
+    });
+  }, 100);
+}
+function stopWaveAnimation() {
+  clearInterval(waveInterval);
+  document.querySelectorAll('.wave-bar').forEach(b => { b.style.height = '4px'; b.style.opacity = '0.3'; });
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+function setStatus(text) {
+  document.getElementById('statusText').textContent = text;
+}
+function clearMessages() {
+  document.getElementById('messages').innerHTML = `
+    <div class="detail-empty">
+      <div class="detail-empty-icon">🎬</div>
+      <p>マイクボタンを押して<br>音声認識を開始<br><br>またはデモを試してみて</p>
+    </div>`;
+  document.getElementById('detailContent').innerHTML = `
+    <div class="detail-empty">
+      <div class="detail-empty-icon">💬</div>
+      <p>吹き出しをタップすると<br>単語解説が表示されます</p>
+    </div>`;
+  window._msgData = {};
+  messageId = 0;
+  demoIdx = 0;
+  selectedBubbleId = null;
+  SpeakerEngine.reset();
+  updateProfileUI();
+  setStatus('クリアしました');
+}
+
+// ============================================================
+// Tab switching (defined once, handles all modes cleanly)
+// ============================================================
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  document.getElementById('panel-' + tab).classList.add('active');
+  if (isRecording) stopRecording();
+  if (convState.active) convStop();
+  if (subState.active) subStop();
+  document.getElementById('movieLangSelector').style.display = tab === 'movie' ? 'flex' : 'none';
+}
+
+// ============================================================
+// Conversation Mode Engine — with Code-Switching support
+// ============================================================
+//
+// Code-switching (コードスイッチング) = mixing two languages
+// in a single utterance. Common in India: Telugu+English.
+// 
+// Strategy:
+//   1. For CS modes: run TWO recognition engines simultaneously
+//      — one set to en-US, one set to te-IN — and pick whichever
+//      returns a longer/more confident result.
+//   2. Pass BOTH language contexts to Claude, which can understand
+//      and translate mixed Telugu-English naturally.
+//   3. Show a "detected language mix" indicator in the UI.
+//
+// ============================================================
+
+const CONV_PAIRS = {
+  'ja-en':    { a: { codes: ['ja-JP'],          label: '日本語',        badge: 'JA', target: 'ja', cs: false },
+                b: { codes: ['en-US'],           label: 'English',       badge: 'EN', target: 'en', cs: false } },
+  'ja-te':    { a: { codes: ['ja-JP'],          label: '日本語',        badge: 'JA', target: 'ja', cs: false },
+                b: { codes: ['te-IN'],           label: 'Telugu',        badge: 'TE', target: 'te', cs: false } },
+  'ja-te-cs': { a: { codes: ['ja-JP'],          label: '日本語',        badge: 'JA', target: 'ja', cs: false },
+                b: { codes: ['en-US', 'te-IN'],  label: 'Telugu+English', badge: 'TE+EN', target: 'te-en', cs: true } },
+  'ja-ko':    { a: { codes: ['ja-JP'],          label: '日本語',        badge: 'JA', target: 'ja', cs: false },
+                b: { codes: ['ko-KR'],           label: '한국어',        badge: 'KO', target: 'ko', cs: false } },
+  'ja-zh':    { a: { codes: ['ja-JP'],          label: '日本語',        badge: 'JA', target: 'ja', cs: false },
+                b: { codes: ['zh-CN'],           label: '中文',          badge: 'ZH', target: 'zh', cs: false } },
+  'en-te-cs': { a: { codes: ['en-US'],          label: 'English',       badge: 'EN', target: 'en', cs: false },
+                b: { codes: ['en-US', 'te-IN'],  label: 'Telugu+English', badge: 'TE+EN', target: 'te-en', cs: true } },
+};
+
+const LANG_NAMES = {
+  ja: '日本語', en: 'English', te: 'Telugu', ko: '한국어', zh: '中文',
+  'te-en': 'Telugu/English (mixed)'
+};
+
+// Target language for display (what Japanese speaker sees)
+const TARGET_DISPLAY = {
+  ja: 'ja', en: 'ja', te: 'ja', ko: 'ja', zh: 'ja', 'te-en': 'ja'
+};
+
+let convState = { active: false, side: null, recognitions: [] };
+let convHistory = [];
+
+function updateConvPair() {
+  const pair = CONV_PAIRS[document.getElementById('convPair').value];
+  document.getElementById('convBadgeA').textContent = pair.a.badge;
+  document.getElementById('convBadgeB').textContent = pair.b.badge;
+  // Show CODE-SWITCH badge if either side is CS
+  const isCS = pair.a.cs || pair.b.cs;
+  document.getElementById('csBadge').style.display = isCS ? 'block' : 'none';
+  document.getElementById('convModeLabel').textContent = isCS ? 'CS MODE' : 'CONV MODE';
+}
+
+function convStartA() { convStart('a'); }
+function convStartB() { convStart('b'); }
+
+function convStart(side) {
+  if (convState.active && convState.side === side) { convStop(); return; }
+  if (convState.active) convStop();
+
+  const pairKey = document.getElementById('convPair').value;
+  const pair    = CONV_PAIRS[pairKey];
+  const cfg     = pair[side];
+  const opp     = side === 'a' ? pair.b : pair.a;
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { setConvStatus('⚠ Chromeで開いてください'); return; }
+
+  convState.active = true;
+  convState.side   = side;
+  convState.recognitions = [];
+
+  // Activate mic button
+  document.getElementById('convMicA').classList.remove('active-a', 'active-b');
+  document.getElementById('convMicB').classList.remove('active-a', 'active-b');
+  document.getElementById('convMic' + side.toUpperCase()).classList.add('active-' + side);
+  document.getElementById('convDot' + side.toUpperCase()).style.animation = 'pulse 0.8s infinite';
+
+  const csLabel = cfg.cs ? '🔀 コードスイッチング検出モード' : `🎙 ${cfg.label}`;
+  setConvStatus(`${csLabel} で話してください...`);
+  setConvMain(side, `<span style="opacity:0.4;font-size:1.2rem;">聴き取り中...</span>`, '', '');
+
+  if (cfg.cs && cfg.codes.length > 1) {
+    // ── Code-switching: dual recognition race ──
+    startDualRecognition(side, cfg, opp, SR);
+  } else {
+    // ── Standard single-language recognition ──
+    startSingleRecognition(side, cfg, opp, SR);
+  }
+}
+
+// ── Single language recognition ──────────────────────────────
+function startSingleRecognition(side, cfg, opp, SR) {
+  const rec = new SR();
+  rec.lang = cfg.codes[0];
+  rec.continuous = false;
+  rec.interimResults = true;
+  convState.recognitions.push(rec);
+
+  let finalText = '';
+
+  rec.onresult = (e) => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
+    }
+    if (interim) setConvMain(side, `<span style="opacity:0.5;">${interim}</span>`, '', '');
+  };
+
+  rec.onend = () => handleRecognitionEnd(side, cfg, opp, finalText, null);
+  rec.onerror = (e) => { setConvStatus('エラー: ' + e.error); convStop(); };
+  rec.start();
+}
+
+// ── Dual recognition for code-switching ──────────────────────
+// Fires two recognisers in parallel; takes whichever gives more text.
+function startDualRecognition(side, cfg, opp, SR) {
+  const results = { 0: '', 1: '' };
+  const done    = { 0: false, 1: false };
+  let interimShown = '';
+
+  cfg.codes.forEach((langCode, idx) => {
+    const rec = new SR();
+    rec.lang = langCode;
+    rec.continuous = false;
+    rec.interimResults = true;
+    convState.recognitions.push(rec);
+
+    rec.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) results[idx] += e.results[i][0].transcript;
+        else interim += e.results[i][0].transcript;
+      }
+      // Show the longer interim result
+      if (interim.length > interimShown.length) {
+        interimShown = interim;
+        setConvMain(side, `<span style="opacity:0.5;">${interim}</span>`, '', '');
+      }
+    };
+
+    rec.onend = () => {
+      done[idx] = true;
+      if (done[0] && done[1]) {
+        // Pick the longer result (more words = better recognition)
+        const bestText = results[0].length >= results[1].length ? results[0] : results[1];
+        const detectedLang = results[0].length >= results[1].length ? cfg.codes[0] : cfg.codes[1];
+        showCSDetectedLang(side, detectedLang, results);
+        handleRecognitionEnd(side, cfg, opp, bestText, { en: results[0], te: results[1] });
+      }
+    };
+
+    rec.onerror = () => {
+      done[idx] = true;
+      if (done[0] && done[1]) {
+        const bestText = results[0] || results[1];
+        handleRecognitionEnd(side, cfg, opp, bestText, null);
+      }
+    };
+
+    // Small stagger so browsers don't block the second mic request
+    setTimeout(() => { try { rec.start(); } catch(e) {} }, idx * 80);
+  });
+}
+
+// Show which language was actually detected
+function showCSDetectedLang(side, detectedCode, results) {
+  const enLen = results[0]?.length || 0;
+  const teLen = results[1]?.length || 0;
+  const total = enLen + teLen || 1;
+  const enPct = Math.round(enLen / total * 100);
+  const tePct = 100 - enPct;
+
+  const badge = document.getElementById('convBadge' + side.toUpperCase());
+  badge.style.background = 'rgba(255,215,0,0.12)';
+  badge.style.borderColor = 'rgba(255,215,0,0.4)';
+  badge.style.color = '#ffd700';
+  badge.textContent = `EN${enPct}% TE${tePct}%`;
+  setTimeout(() => {
+    badge.style.background = '';
+    badge.style.borderColor = '';
+    badge.style.color = '';
+    badge.textContent = 'TE+EN';
+  }, 4000);
+}
+
+// ── After recognition ends: translate + display ───────────────
+async function handleRecognitionEnd(side, cfg, opp, finalText, csResults) {
+  if (!finalText.trim()) {
+    convStop();
+    setConvStatus('音声が取得できませんでした。もう一度押してください。');
+    return;
+  }
+
+  setConvMain(side, finalText, '', '翻訳中...');
+  setConvStatus('翻訳しています...');
+
+  const translation = await convTranslate(finalText, cfg.target, cfg.cs, csResults);
+  const oppSide = side === 'a' ? 'b' : 'a';
+
+  // Show translation on opposite side (big)
+  setConvMain(oppSide, translation.main, translation.sub, finalText);
+  document.getElementById('convBadge' + oppSide.toUpperCase()).textContent = opp.badge;
+
+  // Clean up speaker's own side
+  setConvMain(side, finalText, `→ 翻訳しました`, '');
+
+  addConvHistory(side, finalText, translation.main, translation.detectedMix);
+  convStop();
+  setConvStatus('翻訳完了 — もう一度話すにはマイクボタンを押してください');
+}
+
+function convStop() {
+  convState.active = false;
+  convState.recognitions.forEach(r => { try { r.stop(); } catch(e) {} });
+  convState.recognitions = [];
+  document.getElementById('convMicA').classList.remove('active-a', 'active-b');
+  document.getElementById('convMicB').classList.remove('active-a', 'active-b');
+  document.getElementById('convDotA').style.animation = '';
+  document.getElementById('convDotB').style.animation = '';
+}
+
+function setConvMain(side, main, sub, orig) {
+  const s = side.toUpperCase();
+  document.getElementById('convMain' + s).innerHTML = main;
+  document.getElementById('convSub'  + s).textContent = sub  || '';
+  document.getElementById('convOrig' + s).textContent = orig || '';
+}
+
+function setConvStatus(text) {
+  document.getElementById('convStatus').textContent = text;
+}
+
+// ── Translation with code-switching awareness ─────────────────
+async function convTranslate(text, targetLang, isCS, csResults) {
+  // Build a richer prompt for CS scenarios
+  let systemContext = '';
+  if (isCS) {
+    systemContext = `IMPORTANT: The speaker is Indian and uses code-switching — mixing Telugu and English naturally in the same sentence. This is called "Tenglish". 
+Examples of Tenglish: "Nenu office ki veltunna, but meeting cancel ayindi" / "Idi chala good idea, we should implement cheyyadam".
+You must understand the FULL meaning across both languages and translate it naturally into Japanese as a single coherent sentence. Do NOT leave any part untranslated.`;
+  }
+
+  const targetDisplay = targetLang === 'te-en' ? 'Japanese (日本語)' : LANG_NAMES[targetLang] || targetLang;
+
+  // If we have both CS results, include them to help Claude
+  let inputContext = `"${text}"`;
+  if (csResults && isCS) {
+    inputContext = `Mixed speech detected:
+- English recognition result: "${csResults[0] || '(not detected)'}"
+- Telugu recognition result: "${csResults[1] || '(not detected)'}"
+- Best combined text: "${text}"`;
+  }
+
+  const prompt = `${systemContext}
+
+Translate the following to ${targetDisplay}. Context: live conversation.
+
+${inputContext}
+
+Respond ONLY with JSON (no markdown):
+{
+  "main": "natural translation in ${targetDisplay}",
+  "sub": "one short note in Japanese about tone/nuance (max 25 chars) or empty string",
+  "detectedMix": "brief description of language mix detected, e.g. '70% Telugu, 30% English' or null if not mixed"
+}`;
+
+  try {
+    const raw = await callClaude([{ role: 'user', content: prompt }], 500);
+    const json = JSON.parse(raw);
+    return { main: json.main || text, sub: json.sub || '', detectedMix: json.detectedMix || null };
+  } catch(e) {
+    return { main: text + `（翻訳エラー: ${e.message}）`, sub: '', detectedMix: null };
+  }
+}
+
+function addConvHistory(side, original, translation, detectedMix) {
+  convHistory.unshift({ side, original, translation });
+  const list = document.getElementById('convHistoryList');
+  const placeholder = list.querySelector('div[style]');
+  if (placeholder) placeholder.remove();
+
+  const item = document.createElement('div');
+  item.className = 'conv-history-item';
+  const mixTag = detectedMix
+    ? `<span style="font-size:0.55rem;font-family:'Space Mono',monospace;color:#ffd700;background:rgba(255,215,0,0.1);border:1px solid rgba(255,215,0,0.2);border-radius:3px;padding:1px 4px;margin-left:4px;">${detectedMix}</span>` : '';
+  item.innerHTML = `
+    <span class="conv-history-who who-${side}">${side.toUpperCase()}</span>
+    <div style="flex:1;">
+      <div class="conv-history-text">${translation}</div>
+      <div class="conv-history-orig">${original}${mixTag}</div>
+    </div>`;
+  list.insertBefore(item, list.firstChild);
+}
+
+function clearConv() {
+  convHistory = [];
+  document.getElementById('convHistoryList').innerHTML =
+    `<div style="color:var(--muted);font-size:0.72rem;font-family:'Space Mono',monospace;padding:8px 0;">まだ会話がありません</div>`;
+  setConvMain('a', `<span class="conv-idle"><span class="icon">🎙</span>マイクを押して<br>話してください</span>`, '', '');
+  setConvMain('b', `<span class="conv-idle"><span class="icon">🤝</span>相手の言語を<br>自動翻訳します</span>`, '', '');
+  setConvStatus('どちらかのマイクボタンを押してください');
+  convStop();
+}
+
+// Init pair on load
+updateConvPair();
+
+// ============================================================
+// 📺 Subtitle Mode Engine
+// ============================================================
+// Uses getDisplayMedia() to capture tab audio (no driver needed).
+// Two recognition paths:
+//   - Normal: single SpeechRecognition on chosen language
+//   - Tenglish: dual-recognition race (same as conv mode)
+// Translations go through Anthropic API with subtitle-optimised
+// prompts (brief, natural, no word-for-word).
+// ============================================================
+
+let subState = {
+  active: false,
+  paused: false,
+  audioCtx: null,
+  mediaStream: null,
+  recognitions: [],
+  waveInterval: null,
+  selectedHistId: null,
+};
+let subHistory = [];
+let subMsgId = 0;
+
+// Lang code → display label
+const SUB_LANG_LABELS = {
+  'en-US': 'EN → 日本語',
+  'te-IN': 'TE → 日本語',
+  'te-en': 'TE+EN → 日本語',
+  'hi-IN': 'HI → 日本語',
+  'ko-KR': 'KO → 日本語',
+  'zh-CN': 'ZH → 日本語',
+  'fr-FR': 'FR → 日本語',
+};
+
+async function subStart() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { alert('Chromeで開いてください（Web Speech API必要）'); return; }
+
+  const srcLang = document.getElementById('subSrcLang').value;
+
+  // ── Step 1: request screen + tab audio capture ──
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,          // must request video to get audio in most browsers
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        sampleRate: 44100,
+      },
+      preferCurrentTab: false,
+    });
+  } catch(e) {
+    if (e.name === 'NotAllowedError') {
+      alert('画面共有がキャンセルされました。もう一度「画面共有を開始」を押してください。');
+    } else {
+      alert('画面共有エラー: ' + e.message + '\n\nヒント: 共有ダイアログで「タブ」を選び「音声も共有」にチェックしてください。');
+    }
+    return;
+  }
+
+  // Check we actually have audio tracks
+  const audioTracks = stream.getAudioTracks();
+  if (!audioTracks.length) {
+    // Still proceed but warn — some browsers need manual audio permission
+    console.warn('No audio track in stream — recognition may be silent.');
+  }
+
+  subState.mediaStream = stream;
+  subState.active = true;
+  subState.paused = false;
+
+  // ── Step 2: pipe audio to SpeechRecognition via AudioContext ──
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  subState.audioCtx = new AudioCtx();
+  const src = subState.audioCtx.createMediaStreamSource(stream);
+  // Create a destination stream the recognition engines can use
+  const dest = subState.audioCtx.createMediaStreamDestination();
+  src.connect(dest);
+  const recognitionStream = dest.stream;
+
+  // Show live view
+  document.getElementById('subSetupGuide').style.display = 'none';
+  document.getElementById('subLiveView').style.display   = 'flex';
+  document.getElementById('subLiveLang').textContent = SUB_LANG_LABELS[srcLang] || srcLang;
+
+  subStartWave();
+
+  // Stop if user closes the share dialog/tab
+  stream.getVideoTracks()[0]?.addEventListener('ended', () => { if (subState.active) subStop(); });
+
+  // ── Step 3: start recognition ──
+  if (srcLang === 'te-en') {
+    subStartDualRec(['en-US', 'te-IN'], recognitionStream, SR);
+  } else {
+    subStartSingleRec(srcLang, recognitionStream, SR);
+  }
+}
+
+function subStartSingleRec(langCode, stream, SR) {
+  const rec = new SR();
+  rec.lang = langCode;
+  rec.continuous = true;
+  rec.interimResults = true;
+  subState.recognitions.push(rec);
+
+  let finalBuffer = '';
+  let interimTimer = null;
+
+  rec.onresult = (e) => {
+    if (subState.paused) return;
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) {
+        finalBuffer += e.results[i][0].transcript + ' ';
+        clearTimeout(interimTimer);
+        // Flush after short pause (collect a full sentence)
+        interimTimer = setTimeout(() => {
+          const text = finalBuffer.trim();
+          finalBuffer = '';
+          if (text) subHandleFinal(text, false, null);
+        }, 800);
+      } else {
+        interim += e.results[i][0].transcript;
+      }
+    }
+    if (interim) document.getElementById('subInterim').textContent = interim;
+  };
+
+  rec.onend = () => { if (subState.active && !subState.paused) { try { rec.start(); } catch(e){} } };
+  rec.onerror = (e) => { if (e.error !== 'no-speech') console.warn('SubRec error:', e.error); };
+  rec.start();
+}
+
+function subStartDualRec(codes, stream, SR) {
+  // Same dual-race strategy as conversation mode
+  const buffers   = { 0: '', 1: '' };
+  const flushTimers = { 0: null, 1: null };
+
+  codes.forEach((langCode, idx) => {
+    const rec = new SR();
+    rec.lang = langCode;
+    rec.continuous = true;
+    rec.interimResults = true;
+    subState.recognitions.push(rec);
+
+    rec.onresult = (e) => {
+      if (subState.paused) return;
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) {
+          buffers[idx] += e.results[i][0].transcript + ' ';
+          clearTimeout(flushTimers[idx]);
+          flushTimers[idx] = setTimeout(() => {
+            // When both flush, pick best
+            const b0 = buffers[0].trim(), b1 = buffers[1].trim();
+            const best = b0.length >= b1.length ? b0 : b1;
+            buffers[0] = ''; buffers[1] = '';
+            if (best) subHandleFinal(best, true, { en: b0, te: b1 });
+          }, 900);
+        } else { interim += e.results[i][0].transcript; }
+      }
+      if (interim) {
+        const cur = document.getElementById('subInterim');
+        if (interim.length > (cur.textContent?.length || 0)) cur.textContent = interim;
+      }
+    };
+
+    rec.onend = () => { if (subState.active && !subState.paused) { try { rec.start(); } catch(e){} } };
+    rec.onerror = () => {};
+    setTimeout(() => { try { rec.start(); } catch(e){} }, idx * 80);
+  });
+}
+
+async function subHandleFinal(text, isCS, csResults) {
+  // Clear interim
+  document.getElementById('subInterim').textContent = '';
+  // Show original while translating
+  document.getElementById('subCurrentOrig').textContent = text;
+  document.getElementById('subCurrentMain').textContent = '翻訳中...';
+
+  const translation = await subTranslate(text, isCS, csResults);
+
+  // Display in current box
+  document.getElementById('subCurrentMain').textContent = translation.ja;
+  document.getElementById('subCurrentOrig').textContent = text;
+
+  // Add to history
+  const id = ++subMsgId;
+  subHistory.push({ id, original: text, ja: translation.ja, words: translation.words });
+  subAddHistLine(id, translation.ja, text);
+
+  // If learn mode: auto-show words of latest line
+  if (document.getElementById('subLearnMode').checked) {
+    subShowLearn(id);
+  }
+}
+
+async function subTranslate(text, isCS, csResults) {
+  const isLearn = document.getElementById('subLearnMode').checked;
+
+  let csNote = '';
+  if (isCS) {
+    csNote = `IMPORTANT: The speaker uses code-switching (Tenglish) — mixing Telugu and English naturally. 
+EN recognition: "${csResults?.en || ''}", TE recognition: "${csResults?.te || ''}". 
+Understand the full meaning across both languages.`;
+  }
+
+  const wordSection = isLearn ? `
+  "words": [
+    {"original": "word/phrase", "reading": "カタカナ読み", "meaning": "日本語の意味", "tag": "品詞", "example": "使用例"}
+  ]` : '"words": []';
+
+  const prompt = `${csNote}
+You are generating real-time subtitles for a Japanese viewer watching a foreign video.
+
+Original speech: "${text}"
+
+Rules:
+- Translate naturally into Japanese — like a professional subtitle, NOT word-for-word
+- Keep it BRIEF and READABLE at a glance (under 40 characters if possible)
+- Preserve the speaker's tone (casual/formal/emotional)
+- If the meaning is unclear, make your best natural guess
+
+Respond ONLY with JSON (no markdown):
+{
+  "ja": "natural Japanese subtitle",
+  ${wordSection}
+}`;
+
+  try {
+    const raw = await callClaude([{ role: 'user', content: prompt }], 600);
+    const json = JSON.parse(raw);
+    return { ja: json.ja || text, words: json.words || [] };
+  } catch(e) {
+    return { ja: text + `（翻訳エラー: ${e.message}）`, words: [] };
+  }
+}
+
+function subAddHistLine(id, ja, original) {
+  const scroll = document.getElementById('subHistoryScroll');
+  const line = document.createElement('div');
+  line.className = 'sub-hist-line';
+  line.id = 'subhist-' + id;
+  line.onclick = () => subShowLearn(id);
+  line.innerHTML = `<div class="sub-hist-ja">${ja}</div><div class="sub-hist-orig">${original}</div>`;
+  scroll.appendChild(line);
+  scroll.scrollTop = scroll.scrollHeight;
+}
+
+function subShowLearn(id) {
+  // Deselect all
+  document.querySelectorAll('.sub-hist-line').forEach(l => l.classList.remove('selected'));
+  const lineEl = document.getElementById('subhist-' + id);
+  if (lineEl) lineEl.classList.add('selected');
+
+  const item = subHistory.find(h => h.id === id);
+  if (!item) return;
+
+  const panel = document.getElementById('subLearnContent');
+  panel.innerHTML = '';
+
+  // Sentence box (reuse existing styles)
+  const sentBox = document.createElement('div');
+  sentBox.className = 'full-sentence-box';
+  sentBox.innerHTML = `
+    <div class="label">📝 字幕</div>
+    <div class="translation" style="font-size:1.05rem;">${item.ja}</div>
+    <div class="nuance" style="margin-top:6px;color:var(--muted);">${item.original}</div>`;
+  panel.appendChild(sentBox);
+
+  if (item.words?.length) {
+    const sec = document.createElement('div');
+    sec.className = 'words-section';
+    sec.innerHTML = `<div class="label" style="margin-bottom:10px;">🔤 単語解説</div>`;
+    item.words.forEach(w => {
+      const card = document.createElement('div');
+      card.className = 'word-card';
+      card.innerHTML = `
+        <div class="word-original">${w.original}</div>
+        <div class="word-reading">${w.reading || ''}</div>
+        <div class="word-meaning">${w.meaning}</div>
+        ${w.example ? `<div class="word-example">💡 ${w.example}</div>` : ''}
+        <div class="word-tags"><span class="word-tag">${w.tag || ''}</span></div>`;
+      sec.appendChild(card);
+    });
+    panel.appendChild(sec);
+  } else {
+    panel.innerHTML += `<div style="color:var(--muted);font-size:0.75rem;font-family:'Space Mono',monospace;text-align:center;padding:16px;">単語学習モードをONにすると<br>ここに解説が表示されます</div>`;
+  }
+}
+
+function subTogglePause() {
+  subState.paused = !subState.paused;
+  const btn = document.getElementById('subPauseBtn');
+  btn.textContent = subState.paused ? '▶ 再開' : '⏸ 一時停止';
+  if (!subState.paused) {
+    // Restart recognitions after unpause
+    subState.recognitions.forEach(r => { try { r.start(); } catch(e){} });
+  }
+}
+
+function subStop() {
+  subState.active = false;
+  subState.paused = false;
+  subState.recognitions.forEach(r => { try { r.stop(); } catch(e){} });
+  subState.recognitions = [];
+  if (subState.mediaStream) { subState.mediaStream.getTracks().forEach(t => t.stop()); subState.mediaStream = null; }
+  if (subState.audioCtx) { subState.audioCtx.close(); subState.audioCtx = null; }
+  clearInterval(subState.waveInterval);
+
+  // Show setup guide again
+  document.getElementById('subSetupGuide').style.display = 'flex';
+  document.getElementById('subLiveView').style.display   = 'none';
+}
+
+function subClearHistory() {
+  subHistory = [];
+  subMsgId = 0;
+  document.getElementById('subHistoryScroll').innerHTML = '';
+  document.getElementById('subCurrentMain').textContent = '';
+  document.getElementById('subCurrentOrig').textContent = '';
+  document.getElementById('subInterim').textContent = '音声を聴き取っています...';
+  document.getElementById('subLearnContent').innerHTML = `
+    <div class="detail-empty">
+      <div class="detail-empty-icon" style="font-size:1.8rem;">💡</div>
+      <p style="font-size:0.75rem;">字幕をタップすると<br>単語解説が表示されます</p>
+    </div>`;
+}
+
+function subStartWave() {
+  const bars = document.querySelectorAll('.sub-wave-bar');
+  subState.waveInterval = setInterval(() => {
+    bars.forEach(b => {
+      b.style.height = (Math.random() * 14 + 3) + 'px';
+      b.style.opacity = (Math.random() * 0.5 + 0.3).toFixed(2);
+    });
+  }, 120);
+}
+
+// ============================================================
+// ⌨️ Text Chat / Translation
+// ============================================================
+let textChatWho = 'a'; // 'a' or 'b'
+
+function setTextWho(side) {
+  textChatWho = side;
+  document.getElementById('textWhoA').classList.toggle('active', side === 'a');
+  document.getElementById('textWhoB').classList.toggle('active', side === 'b');
+}
+
+function textChatKeydown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    textChatSend();
+  }
+}
+
+async function textChatSend() {
+  const input = document.getElementById('textChatInput');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+
+  const pairKey = document.getElementById('convPair').value;
+  const pair    = CONV_PAIRS[pairKey];
+  const side    = textChatWho;
+  const cfg     = pair[side];
+  const opp     = side === 'a' ? pair.b : pair.a;
+
+  // Remove empty placeholder
+  const msgs = document.getElementById('textChatMessages');
+  const empty = msgs.querySelector('.text-chat-empty');
+  if (empty) empty.remove();
+
+  // Show "translating" bubble immediately
+  const bubble = document.createElement('div');
+  bubble.className = `text-chat-bubble side-${side}`;
+  bubble.innerHTML = `
+    <div class="text-chat-bubble-orig">${cfg.badge} → ${opp.badge} &nbsp;|&nbsp; ${text}</div>
+    <div class="text-chat-bubble-trans" style="opacity:0.4;">翻訳中...</div>`;
+  msgs.appendChild(bubble);
+  msgs.scrollTop = msgs.scrollHeight;
+
+  // Translate — figure out source lang context
+  const isCS = cfg.cs || false;
+  const targetLang = cfg.target; // what the speaker's side translates TO
+  const displayLang2 = side === 'a' ? opp.codes[0] : pair.a.codes[0];
+
+  const result = await textChatTranslate(text, side, pair, isCS);
+
+  // Update bubble with result
+  bubble.innerHTML = `
+    <div class="text-chat-bubble-orig">${cfg.badge} → ${opp.badge} &nbsp;|&nbsp; ${text}</div>
+    <div class="text-chat-bubble-trans">${result.main}</div>
+    ${result.nuance ? `<div class="text-chat-bubble-nuance">💡 ${result.nuance}</div>` : ''}`;
+  msgs.scrollTop = msgs.scrollHeight;
+
+  // Also add to shared conversation history
+  addConvHistory(side, text, result.main, null);
+}
+
+async function textChatTranslate(text, side, pair, isCS) {
+  const cfg = pair[side];
+  const opp = side === 'a' ? pair.b : pair.a;
+
+  // Determine: what language is the text in, and what should it become?
+  // Side A is always Japanese speaker → translate to B's language
+  // Side B is the foreign speaker → translate to Japanese
+  const srcLangName = side === 'a' ? '日本語' : (LANG_NAMES[opp.target] || opp.codes[0]);
+  const tgtLangName = side === 'a' ? (LANG_NAMES[opp.target] || 'English') : '日本語';
+
+  let csNote = '';
+  if (isCS && side === 'b') {
+    csNote = `The text may contain code-switching (Tenglish — mixing Telugu and English). Understand the full meaning across both languages.`;
+  }
+
+  const prompt = `${csNote}
+Translate the following text from ${srcLangName} to ${tgtLangName}.
+Context: bilingual conversation between a Japanese person and a ${cfg.label} speaker.
+
+Text: "${text}"
+
+Respond ONLY with JSON (no markdown):
+{
+  "main": "natural translation in ${tgtLangName}",
+  "nuance": "one short note in Japanese about tone or nuance (max 30 chars), or empty string"
+}`;
+
+  try {
+    const raw = await callClaude([{ role: 'user', content: prompt }], 400);
+    const json = JSON.parse(raw);
+    return { main: json.main || text, nuance: json.nuance || '' };
+  } catch(e) {
+    return { main: `（翻訳エラー: ${e.message}）`, nuance: '' };
+  }
+}
+
+// Auto-demo on load
+loadApiKey();
+setTimeout(() => {
+  setStatus('← デモボタンで動作を確認できます');
+}, 500);
+</script>
+</body>
+</html>
